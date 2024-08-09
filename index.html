@@ -3,11 +3,69 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>File Download</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
-    <video id="videoPlayer" width="650" controls autoplay>
-        <source src="/video" type="video/mp4">
-    </video>
+    <div class="container">
+        <h1>Download File</h1>
+        <form id="downloadForm">
+            <label for="fileId">Enter File ID to Download:</label>
+            <input type="text" id="fileId" name="fileId" required>
+            <button type="submit">Download PDF</button>
+        </form>
+        <p id="message"></p>
+    </div>
+
+    <script>
+        document.getElementById('downloadForm').addEventListener('submit', async function (event) {
+            event.preventDefault();
+            const fileId = document.getElementById('fileId').value;
+            const messageEl = document.getElementById('message');
+
+            try {
+                const response = await fetch(`/api/fileDownload/${fileId}`, {
+                    method: 'GET'
+                });
+
+                if (response.ok) {
+                    const fileType = response.headers.get('Content-Type');
+                    console.log(response.headers.get('Content-Type'));
+                    const blob = await response.blob();
+                    const url = URL.createObjectURL(blob);
+
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `file_${fileId}.${fileType}`; // Set the default download filename
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+
+                    messageEl.textContent = 'File downloaded successfully!';
+                } else {
+                    messageEl.textContent = 'Failed to download the file. Please check the File ID.';
+                }
+            } catch (error) {
+                messageEl.textContent = 'Error occurred while downloading the file.';
+                console.error('Error downloading file:', error);
+            }
+        });
+    </script>
 </body>
 </html>

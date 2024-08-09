@@ -1,8 +1,11 @@
 const express = require("express");
 const mysql = require("mysql2");
 const { Readable } = require("stream"); 
+const fs = require('fs')
+const path = require('path')
 
 const app = express();
+app.use(express.json({ limit: "1000mb" }));
 
 const db = mysql.createConnection({
     host: "localhost",
@@ -22,52 +25,85 @@ app.get("/", (req, res) => {
     res.sendFile(__dirname + "/index.html");
 });
 
-app.get("/video", async (req, res) => {
+
+
+app.post("/api/fileUpload", async (req, res) => {
     try {
-        const query = `SELECT videoBase64 FROM video_storage WHERE id = ?`;
+        const { fileData, fileName, fileType } = req.body;    
+        const query = 'INSERT INTO file_storage (filename, filetype, filedata) VALUES (?, ?, ?)';
 
-        const [videos] = await db.promise().query(query, [1]);
+        const [results] = await db.promise().query(query, [fileName, fileType, Buffer.from(fileData, 'base64')]);
 
-        if (videos.length === 0) {
-            res.status(404).send("No video found");
+
+        // Check if the query was successful
+        if (results.affectedRows > 0) {
+            // Query was successful, send a response
+            res.status(201).json({
+                message: 'File uploaded successfully',
+                fileId: results.insertId,
+                affectedRows: results.affectedRows
+            });
+        } else {
+            // Query did not affect any rows, possibly a failure
+            res.status(400).json({
+                message: 'File upload failed',
+                error: 'No rows affected'
+            });
         }
 
-        const videoBase64 = videos[0].videoBase64;
-        const videoBuffer = Buffer.from(videoBase64, "base64");
-
-        const range = req.headers.range;
-
-        if (!range) {
-            res.status(400).send("Requires Range header");
-        }
-
-        const videoSize = videoBuffer.length;
-
-        const chunkSize = 10 ** 6;
-        const start = Number(range.replace(/\D/g, ""));
-        const end = Math.min(start + chunkSize, videoSize - 1);
-        const contentLength = end - start + 1;
-        const headers = {
-            "Content-Range": `bytes ${start}-${end}/${videoSize}`,
-            "Accept-Ranges": "bytes",
-            "Content-Length": contentLength,
-            "Content-Type": "video/mp4",
-        };
-        res.writeHead(206, headers);
-        // Create a readable stream from the video buffer
-        const videoStream = new Readable({
-            read() {
-                this.push(videoBuffer.slice(start, end + 1));
-                this.push(null); // Signal the end of the stream
-            },
-        });
-
-        // Pipe the video stream to the response
-        videoStream.pipe(res);
     } catch (error) {
         console.log(error);
     }
+})
+
+// Endpoint to download a file
+app.get("/api/fileDownload/:id", async (req, res) => {
+    try {
+        const fileId = req.params.id;
+        const query = "SELECT filename, filetype, filedata FROM file_storage WHERE id = ?";
+        const [resuts] = await db.promise().query(query, [fileId]);
+
+        if (resuts.length === 0) {
+            return res.status(404).json({ message: "File not found" });
+        }
+
+        const file = resuts[0];
+        // Set the headers to indicate file type and prompt download
+        res.setHeader("Content-Type", file.filetype);
+        res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+
+        // Create a readable stream from the file data buffer
+        const fileStream = new Readable();
+        fileStream._read = () => {}; // No-op
+        fileStream.push(file.filedata);
+        fileStream.push(null);
+
+        // Pipe the file stream to the response
+        fileStream.pipe(res);
+    } catch (error) {
+        console.error("Error downloading file:", error);
+        res.status(500).json({ message: "Internal server error" });
+    }
 });
+
+// Function to insert a file into the database
+async function insertFile(filePath) {
+    const fileData = fs.readFileSync(filePath);
+    const fileName = path.basename(filePath);
+    const fileType = path.extname(filePath).slice(1);
+
+    const res = await fetch('http://localhost:3000/api/fileUpload', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ fileData, fileName, fileType })
+    });
+
+    const data = await res.json();
+    console.log(data);
+}
+// insertFile('tsetup-x64.5.3.1.exe');
 
 app.listen(3000, () => {
     console.log("Server started on port 3000");
